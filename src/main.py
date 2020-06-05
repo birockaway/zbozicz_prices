@@ -155,6 +155,7 @@ class Producer(object):
 
     def produce(self):
         keep_scraping = pd.read_csv('../data/in/tables/keep_scraping.csv', header=None)
+        logging.info(f'Keep scraping: {keep_scraping.iloc[0, 0]}')
         if not keep_scraping.iloc[0, 0]:
             raise DailyScrapingFinishedError
 
@@ -162,7 +163,7 @@ class Producer(object):
             products_df = pd.read_csv('../data/in/tables/ZBOZI_DAILY.csv')
             products_df = products_df[products_df['DATE'] == CURRENT_DATE_STR]
         except Exception as e:
-            print(f'Error reading partial data: {e}')
+            logging.info(f'Loading partial data failed with: {e}')
             products_df = pd.DataFrame(columns=self.all_cols)
 
         skip_execution = False
@@ -173,6 +174,7 @@ class Producer(object):
 
         counter = 0
         while next_url is not None:
+            logging.info(f'requesting: {URL_BASE}{next_url}')
             response = requests.get(f'{URL_BASE}{next_url}', auth=self.auth)
             if response.status_code // 100 != 2:
                 time.sleep(1.01)
