@@ -24,7 +24,6 @@ TS = CURRENT_TIME.strftime('%Y%m%d%H%M%S')
 COUNTRY = 'CZ'
 DISTRCHAN = 'MA'
 SOURCE = 'zbozi'
-file = 'API'
 FREQ = 'd'
 SOURCE_ID = f'{SOURCE}_{TS}'
 CURRENT_DATE_STR = datetime.now().strftime('%Y-%m-%d')
@@ -155,7 +154,7 @@ class Producer(object):
 
     def produce(self):
         keep_scraping = pd.read_csv('../data/in/tables/keep_scraping.csv')
-        if keep_scraping.iloc[0, 0]:
+        if not keep_scraping.iloc[0, 0]:
             logging.info(f'Keep scraping: {keep_scraping.iloc[0, 0]}')
             raise DailyScrapingFinishedError
 
