@@ -55,7 +55,7 @@ class Producer(object):
         return self.login, self.password
 
     def update_keep_scraping(self, value):
-        pd.DataFrame({'KS': [value]}).to_csv('../data/out/tables/keep_scraping.csv', index=False, header=False)
+        pd.DataFrame({'KS': [value]}).to_csv('../data/out/tables/keep_scraping.csv', index=False)
 
     def gen_seq_chunks(self, seq, chunk_size):
         for pos in range(0, len(seq), chunk_size):
