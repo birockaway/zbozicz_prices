@@ -10,7 +10,6 @@ from datetime import datetime, timedelta
 
 import logging_gelf.handlers
 import logging_gelf.formatters
-import os
 
 import numpy as np
 import pandas as pd
@@ -157,6 +156,15 @@ class Producer(object):
         return products_df
 
     def produce(self):
+        try:
+            self._produce()
+        except Exception as e:
+            logging.exception(f'Error occurred {e}')
+        finally:
+            # send ending token
+            self.task_queue.put('DONE')
+
+    def _produce(self):
         keep_scraping = pd.read_csv('../data/in/tables/keep_scraping.csv')
         if not keep_scraping.iloc[0, 0]:
             logging.info(f'Keep scraping: {keep_scraping.iloc[0, 0]}')
@@ -297,9 +305,6 @@ class Producer(object):
             self.update_keep_scraping(value=0)
             logging.info('End writeout')
 
-        # send ending token
-        self.task_queue.put('DONE')
-
 
 class Writer(object):
     def __init__(self, task_queue, columns_list, threading_event, filepath):
@@ -329,8 +334,6 @@ if __name__ == '__main__':
     logging_gelf_handler.setFormatter(logging_gelf.formatters.GELFFormatter(null_character=True))
     logger.addHandler(logging_gelf_handler)
 
-    logging.critical('A test message')
-
     # logger = logging.getLogger()
     # handler = logging.StreamHandler()
     # formatter = LogstashFormatterV1()
@@ -338,6 +341,7 @@ if __name__ == '__main__':
     # handler.setFormatter(formatter)
     # logger.addHandler(handler)
     logger.setLevel(level='INFO')
+    logging.critical('A test message')
     colnames = ['AVAILABILITY',
                 'COUNTRY',
                 'CSE_ID',
