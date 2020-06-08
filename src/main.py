@@ -8,6 +8,10 @@ import threading
 import time
 from datetime import datetime, timedelta
 
+import logging_gelf.handlers
+import logging_gelf.formatters
+import os
+
 import numpy as np
 import pandas as pd
 import pytz
@@ -171,6 +175,7 @@ class Producer(object):
         all_product_ids = []
         next_url = '/v1/shop/items?paired=True&limit=1000&loadProductDetail=False'
 
+        logging.info('Start product requests')
         counter = 0
         while next_url is not None:
             response = requests.get(f'{URL_BASE}{next_url}', auth=self.auth)
@@ -189,6 +194,7 @@ class Producer(object):
             if counter >= 5:
                 break
 
+        logging.info('End product requests')
         material_map = pd.DataFrame(all_product_ids, columns=['MATERIAL', 'CSE_ID']).astype(object)
         all_pids = material_map['CSE_ID'].to_list()
 
@@ -203,6 +209,7 @@ class Producer(object):
             failed_product_ids_strs.append(ids_str)
 
         new_products_df = pd.DataFrame()
+        logging.info('Start product pages requests')
         while failed_product_ids_strs:
             ids_strs = failed_product_ids_strs[:]
             failed_product_ids_strs = list()
@@ -215,6 +222,7 @@ class Producer(object):
                 product_batch_df = self.get_products(ids_str)
                 if product_batch_df is not None:
                     new_products_df = pd.concat([new_products_df, product_batch_df], sort=True)
+                    got_data = True
                     time.sleep(0.23)
                 else:
                     print('product_ids_str:', ids_str, 'failed')
@@ -223,10 +231,11 @@ class Producer(object):
 
                 skip_execution = (datetime.now() - EXECUTION_START) >= timedelta(hours=5, minutes=45)
                 if skip_execution:
-                    new_products_df = new_products_df.rename(columns={'shopId': 'ZBOZI_SHOP_ID',
-                                                    'availability': 'AVAILABILITY',
-                                                    'matchingId': 'MATCHING_ID',
-                                                    'price': 'PRICE'})
+                    new_products_df = new_products_df.rename(
+                        columns={'shopId': 'ZBOZI_SHOP_ID',
+                                 'availability': 'AVAILABILITY',
+                                 'matchingId': 'MATCHING_ID',
+                                 'price': 'PRICE'})
                     products_df = pd.concat([products_df, new_products_df], sort=True)
                     products_df = self.save_out_tables(products_df, material_map=material_map)
                     self.save_out_subtables(products_df)
@@ -235,8 +244,11 @@ class Producer(object):
             if skip_execution:
                 break
 
+        logging.info('End product pages requests')
+
         ###############################################################################
         # SHOP NAMES
+        logging.info('Start shops requests')
         all_shop_names = list()
         if not skip_execution:
             new_products_df.rename(columns={'shopId': 'ZBOZI_SHOP_ID',
@@ -276,11 +288,14 @@ class Producer(object):
                 if skip_execution:
                     break
 
+        logging.info('End shops requests')
         skip_execution = (datetime.now() - EXECUTION_START) >= timedelta(hours=5, minutes=45)
         if not skip_execution:
+            logging.info('Start writeout')
             products_df = self.save_out_tables(products_df, shop_names=all_shop_names, material_map=material_map)
             self.save_out_subtables(products_df)
             self.update_keep_scraping(value=0)
+            logging.info('End writeout')
 
         # send ending token
         self.task_queue.put('DONE')
@@ -307,12 +322,21 @@ class Writer(object):
 
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger()
-    handler = logging.StreamHandler()
-    formatter = LogstashFormatterV1()
+    logging_gelf_handler = logging_gelf.handlers.GELFTCPSocketHandler(host=os.getenv('KBC_LOGGER_ADDR'),
+                                                                      port=int(os.getenv('KBC_LOGGER_PORT')))
+    logging_gelf_handler.setFormatter(logging_gelf.formatters.GELFFormatter(null_character=True))
+    logger.addHandler(logging_gelf_handler)
 
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+    logging.critical('A test message')
+
+    # logger = logging.getLogger()
+    # handler = logging.StreamHandler()
+    # formatter = LogstashFormatterV1()
+    #
+    # handler.setFormatter(formatter)
+    # logger.addHandler(handler)
     logger.setLevel(level='INFO')
     colnames = ['AVAILABILITY',
                 'COUNTRY',
