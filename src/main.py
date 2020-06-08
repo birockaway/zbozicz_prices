@@ -198,9 +198,9 @@ class Producer(object):
                            ]
             all_product_ids.extend(product_ids)
             next_url = content.get('links', dict()).get('next')
-            counter += 1
-            if counter >= 5:
-                break
+            # counter += 1
+            # if counter >= 5:
+            #     break
 
         logging.info('End product requests')
         material_map = pd.DataFrame(all_product_ids, columns=['MATERIAL', 'CSE_ID']).astype(object)
@@ -223,9 +223,9 @@ class Producer(object):
             failed_product_ids_strs = list()
 
             for ids_str in ids_strs:
-                counter += 1
-                if counter >= 20:
-                    break
+                # counter += 1
+                # if counter >= 20:
+                #     break
 
                 product_batch_df = self.get_products(ids_str)
                 if product_batch_df is not None:
@@ -233,7 +233,7 @@ class Producer(object):
                     got_data = True
                     time.sleep(0.23)
                 else:
-                    print('product_ids_str:', ids_str, 'failed')
+                    logging.info(f'product_ids_str: {ids_str} failed')
                     failed_product_ids_strs.append(ids_str)
                     time.sleep(1.21)
 
@@ -329,17 +329,12 @@ class Writer(object):
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger()
-    logging_gelf_handler = logging_gelf.handlers.GELFTCPSocketHandler(host=os.getenv('KBC_LOGGER_ADDR'),
-                                                                      port=int(os.getenv('KBC_LOGGER_PORT')))
+    logging_gelf_handler = logging_gelf.handlers.GELFTCPSocketHandler(
+        host=os.getenv('KBC_LOGGER_ADDR'),
+        port=int(os.getenv('KBC_LOGGER_PORT')))
     logging_gelf_handler.setFormatter(logging_gelf.formatters.GELFFormatter(null_character=True))
     logger.addHandler(logging_gelf_handler)
 
-    # logger = logging.getLogger()
-    # handler = logging.StreamHandler()
-    # formatter = LogstashFormatterV1()
-    #
-    # handler.setFormatter(formatter)
-    # logger.addHandler(handler)
     logger.setLevel(level='INFO')
     logging.info(f'Starting run of "{SOURCE_ID}"')
     colnames = ['AVAILABILITY',
