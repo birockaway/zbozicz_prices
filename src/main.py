@@ -15,9 +15,9 @@ import numpy as np
 import pandas as pd
 import pytz
 import requests
-from logstash_formatter import LogstashFormatterV1
 from keboola import docker
 
+timeout_delta = timedelta(minutes=50)
 EXECUTION_START = datetime.now()
 URL_BASE = 'https://api.zbozi.cz'
 BATCH_SIZE_PRODUCTS = 10
@@ -64,7 +64,7 @@ class Producer(object):
     def get_products(self, ids_str):
         response = requests.get(f'{URL_BASE}/v1/products/{ids_str}', auth=self.auth)
         if response.status_code // 100 != 2:
-            print('failed products get request:', response.status_code, response.text)
+            logging.warning(f'failed products get request: {response.status_code, response.text}')
             return None
 
         content = json.loads(response.text)
@@ -88,12 +88,11 @@ class Producer(object):
                 product_page['DATE'] = datetime.now().strftime('%Y-%m-%d')
                 product_page['TS'] = datetime.now().strftime('%Y%m%d%H%M%S')
                 product_page['CSE_ID'] = str(data['productId'])
-                # product_page['PRODUCT_NAME'] = data['productName']
                 product_page = product_page.groupby('shopId', as_index=False).first()
                 product_pages = pd.concat([product_pages, product_page], sort=True)
 
         except Exception as e:
-            print(f'Exception: {e}, {str(content)}')
+            logging.warning(f'Exception: {e}, data: {str(content)}')
             return None
         else:
             return product_pages
@@ -167,14 +166,14 @@ class Producer(object):
     def _produce(self):
         keep_scraping = pd.read_csv('../data/in/tables/keep_scraping.csv')
         if not keep_scraping.iloc[0, 0]:
-            logging.info(f'Keep scraping: {keep_scraping.iloc[0, 0]}')
+            logging.error(f'Keep scraping: {keep_scraping.iloc[0, 0]}')
             raise DailyScrapingFinishedError
 
         try:
             products_df = pd.read_csv('../data/in/tables/ZBOZI_DAILY.csv')
             products_df = products_df[products_df['DATE'] == CURRENT_DATE_STR]
         except Exception as e:
-            logging.info(f'Loading partial data failed with: {e}')
+            logging.warning(f'Loading partial data failed with: {e}')
             products_df = pd.DataFrame(columns=self.all_cols)
 
         skip_execution = False
@@ -184,7 +183,7 @@ class Producer(object):
         next_url = '/v1/shop/items?paired=True&limit=1000&loadProductDetail=False'
 
         logging.info('Start product requests')
-        counter = 0
+        # counter = 0
         while next_url is not None:
             response = requests.get(f'{URL_BASE}{next_url}', auth=self.auth)
             if response.status_code // 100 != 2:
@@ -230,14 +229,13 @@ class Producer(object):
                 product_batch_df = self.get_products(ids_str)
                 if product_batch_df is not None:
                     new_products_df = pd.concat([new_products_df, product_batch_df], sort=True)
-                    got_data = True
                     time.sleep(0.23)
                 else:
                     logging.info(f'product_ids_str: {ids_str} failed')
                     failed_product_ids_strs.append(ids_str)
                     time.sleep(1.21)
 
-                skip_execution = (datetime.now() - EXECUTION_START) >= timedelta(hours=5, minutes=45)
+                skip_execution = (datetime.now() - EXECUTION_START) >= timeout_delta
                 if skip_execution:
                     new_products_df = new_products_df.rename(
                         columns={'shopId': 'ZBOZI_SHOP_ID',
@@ -286,7 +284,7 @@ class Producer(object):
                         failed_shop_ids_strs.append(shop_ids_str)
                         time.sleep(1)
 
-                    skip_execution = (datetime.now() - EXECUTION_START) >= timedelta(hours=5, minutes=45)
+                    skip_execution = (datetime.now() - EXECUTION_START) >= timeout_delta
                     if skip_execution:
                         products_df = self.save_out_tables(products_df, shop_names=all_shop_names,
                                                            material_map=material_map)
@@ -297,7 +295,7 @@ class Producer(object):
                     break
 
         logging.info('End shops requests')
-        skip_execution = (datetime.now() - EXECUTION_START) >= timedelta(hours=5, minutes=45)
+        skip_execution = (datetime.now() - EXECUTION_START) >= timeout_delta
         if not skip_execution:
             logging.info('Start writeout')
             products_df = self.save_out_tables(products_df, shop_names=all_shop_names, material_map=material_map)
@@ -327,7 +325,7 @@ class Writer(object):
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.WARNING, handlers=[])  # do not create default stdout handler
     logger = logging.getLogger()
     logging_gelf_handler = logging_gelf.handlers.GELFTCPSocketHandler(
         host=os.getenv('KBC_LOGGER_ADDR'),
@@ -335,7 +333,6 @@ if __name__ == '__main__':
     logging_gelf_handler.setFormatter(logging_gelf.formatters.GELFFormatter(null_character=True))
     logger.addHandler(logging_gelf_handler)
 
-    logger.setLevel(level='INFO')
     logging.info(f'Starting run of "{SOURCE_ID}"')
     colnames = ['AVAILABILITY',
                 'COUNTRY',
