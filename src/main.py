@@ -341,7 +341,7 @@ if __name__ == '__main__':
     # handler.setFormatter(formatter)
     # logger.addHandler(handler)
     logger.setLevel(level='INFO')
-    logging.critical('A test message')
+    logging.info(f'Starting run of "{SOURCE_ID}"')
     colnames = ['AVAILABILITY',
                 'COUNTRY',
                 'CSE_ID',
