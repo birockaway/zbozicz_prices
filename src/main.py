@@ -54,8 +54,9 @@ class Producer(object):
         try:
             # load next url from file, if previous run ended early
             keep_scraping = pd.read_csv(f'{self.datadir}in/tables/keep_scraping.csv', dtype=object)
+            logging.debug(str(keep_scraping))
             next_url = keep_scraping.iloc[0, 0]
-            if next_url and next_url.lower() != 'none':
+            if next_url and str(next_url).lower() != 'none':
                 self.next_url = next_url
             else:
                 raise IndexError()
@@ -420,8 +421,7 @@ class Writer(object):
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.DEBUG,
-                        )  # handlers=[])  # do not create default stdout handler
+    logging.basicConfig(level=logging.DEBUG, handlers=[])  # do not create default stdout handler
     logger = logging.getLogger()
     logging_gelf_handler = logging_gelf.handlers.GELFTCPSocketHandler(
         host=os.getenv('KBC_LOGGER_ADDR'),
