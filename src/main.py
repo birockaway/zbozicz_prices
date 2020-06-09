@@ -17,7 +17,7 @@ import requests
 from keboola import docker
 
 
-TIMEOUT_DELTA = timedelta(minutes=20)
+TIMEOUT_DELTA = timedelta(hours=2, minutes=40)
 EXECUTION_START = datetime.utcnow()
 URL_BASE = 'https://api.zbozi.cz'
 BATCH_SIZE_PRODUCTS = 10
@@ -48,8 +48,6 @@ class Producer(object):
         additional_cols = ['ZBOZI_SHOP_ID', 'MATCHING_ID', 'DATE']
         self.all_cols = self.out_cols + additional_cols
         self.export_table = 'results'
-        self.counter = 0
-        self.failed_counter = 0
 
         try:
             # load next url from file, if previous run ended early
@@ -61,7 +59,7 @@ class Producer(object):
             else:
                 raise IndexError()
 
-        except IndexError:
+        except (IndexError, FileNotFoundError):
             logging.warning('No next_url, starting from scratch')
             self.next_url = '/v1/shop/items?paired=True&limit=1000&loadProductDetail=False'
 
@@ -212,7 +210,6 @@ class Producer(object):
             failed_product_ids_strs = list()
 
             for ids_str in ids_strs:
-                self.counter += 1
                 product_batch_df = self.get_products(ids_str)
                 if product_batch_df is not None:
                     product_batch_df = product_batch_df.rename(
@@ -223,13 +220,10 @@ class Producer(object):
                     products_df = pd.concat([products_df, product_batch_df], sort=True)
                     time.sleep(0.23)
                 else:
-                    self.failed_counter += 1
                     logging.info(f'product_ids_str: {ids_str} failed')
                     failed_product_ids_strs.append(ids_str)
                     time.sleep(1.21)
 
-        logging.debug(self.counter)
-        logging.debug(self.failed_counter)
         logging.debug('End product pages requests')
 
         ###############################################################################
@@ -421,7 +415,7 @@ class Writer(object):
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.DEBUG, handlers=[])  # do not create default stdout handler
+    logging.basicConfig(level=logging.INFO, handlers=[])  # do not create default stdout handler
     logger = logging.getLogger()
     logging_gelf_handler = logging_gelf.handlers.GELFTCPSocketHandler(
         host=os.getenv('KBC_LOGGER_ADDR'),
