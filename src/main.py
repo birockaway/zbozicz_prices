@@ -54,7 +54,7 @@ class Producer(object):
             keep_scraping = pd.read_csv(f'{self.datadir}in/tables/keep_scraping.csv', dtype=object)
             logging.debug(str(keep_scraping))
             next_url = keep_scraping.iloc[0, 0]
-            if next_url and str(next_url).lower() != 'none':
+            if next_url and str(next_url).lower() not in ['none', 'nan', 'false']:
                 self.next_url = next_url
             else:
                 raise IndexError()
@@ -68,6 +68,8 @@ class Producer(object):
         return self.login, self.password
 
     def update_keep_scraping(self):
+        if not self.next_url:
+            logging.warning('Scraping finished, next run will start anew')
         pd.DataFrame({'KS': [self.next_url]}).to_csv(f'{self.datadir}/out/tables/keep_scraping.csv', index=False)
 
     def gen_seq_chunks(self, seq, chunk_size):
@@ -250,148 +252,9 @@ class Producer(object):
         products_df = self.merge_tables(products_df, shop_names=all_shop_names,
                                         material_map=material_map)
         self.write_output(products_df)
-        self.next_url = content.get('links', dict()).get('next')
+        next_url = content.get('links', dict()).get('next')
+        self.next_url = next_url
         self.update_keep_scraping()
-
-    # def _produce(self):
-    #     keep_scraping = pd.read_csv(f'{self.datadir}in/tables/keep_scraping.csv')
-    #     if not keep_scraping.iloc[0, 0]:
-    #         logging.error(f'Keep scraping: {keep_scraping.iloc[0, 0]}')
-    #         raise DailyScrapingFinishedError
-    #
-    #     try:
-    #         products_df = pd.read_csv(f'{self.datadir}in/tables/ZBOZI_DAILY.csv')
-    #         products_df = products_df[products_df['DATE'] == CURRENT_DATE_STR]
-    #     except Exception as e:
-    #         logging.warning(f'Loading partial data failed with: {e}')
-    #         products_df = pd.DataFrame(columns=self.all_cols)
-    #
-    #     skip_execution = False
-    #     ##########################################################################
-    #     # PRODUCT IDS
-    #     all_product_ids = []
-    #     next_url = '/v1/shop/items?paired=True&limit=1000&loadProductDetail=False'
-    #
-    #     logging.debug('Start product requests')
-    #     # counter = 0
-    #     while next_url is not None:
-    #         response = requests.get(f'{URL_BASE}{next_url}', auth=self.auth)
-    #         if response.status_code // 100 != 2:
-    #             time.sleep(1.01)
-    #             continue
-    #
-    #         content = json.loads(response.text)
-    #         product_ids = [(str(item['itemId']), str(item['product']['productId']))
-    #                        for item in content.get('data', list())
-    #                        if item.get('product') is not None
-    #                        ]
-    #         all_product_ids.extend(product_ids)
-    #         next_url = content.get('links', dict()).get('next')
-    #         # counter += 1
-    #         # if counter >= 5:
-    #         #     break
-    #
-    #     logging.debug('End product requests')
-    #     material_map = pd.DataFrame(all_product_ids, columns=['MATERIAL', 'CSE_ID']).astype(object)
-    #     all_pids = material_map['CSE_ID'].to_list()
-    #
-    #     new_product_ids = list(set(all_pids).difference(products_df['CSE_ID'].to_list()))
-    #
-    #     #############################################################################
-    #     # PRODUCT PAGES
-    #     failed_product_ids_strs = list()
-    #
-    #     for ids_group in self.gen_seq_chunks(new_product_ids, BATCH_SIZE_PRODUCTS):
-    #         ids_str = ','.join(map(str, map(int, ids_group)))
-    #         failed_product_ids_strs.append(ids_str)
-    #
-    #     new_products_df = pd.DataFrame()
-    #     logging.debug('Start product pages requests')
-    #     while failed_product_ids_strs:
-    #         ids_strs = failed_product_ids_strs[:]
-    #         failed_product_ids_strs = list()
-    #
-    #         for ids_str in ids_strs:
-    #             # counter += 1
-    #             # if counter >= 20:
-    #             #     break
-    #
-    #             product_batch_df = self.get_products(ids_str)
-    #             if product_batch_df is not None:
-    #                 new_products_df = pd.concat([new_products_df, product_batch_df], sort=True)
-    #                 time.sleep(0.23)
-    #             else:
-    #                 logging.debug(f'product_ids_str: {ids_str} failed')
-    #                 failed_product_ids_strs.append(ids_str)
-    #                 time.sleep(1.21)
-    #
-    #             skip_execution = (datetime.now() - EXECUTION_START) >= TIMEOUT_DELTA
-    #             if skip_execution:
-    #                 new_products_df = new_products_df.rename(
-    #                     columns={'shopId': 'ZBOZI_SHOP_ID',
-    #                              'availability': 'AVAILABILITY',
-    #                              'matchingId': 'MATCHING_ID',
-    #                              'price': 'PRICE'})
-    #                 products_df = pd.concat([products_df, new_products_df], sort=True)
-    #                 products_df = self.merge_tables(products_df, material_map=material_map)
-    #                 self.write_output(products_df)
-    #                 self.update_keep_scraping(value=1)
-    #                 break
-    #         if skip_execution:
-    #             break
-    #
-    #     logging.debug('End product pages requests')
-    #
-    #     ###############################################################################
-    #     # SHOP NAMES
-    #     logging.debug('Start shops requests')
-    #     all_shop_names = list()
-    #     if not skip_execution:
-    #         new_products_df.rename(columns={'shopId': 'ZBOZI_SHOP_ID',
-    #                                         'matchingId': 'MATCHING_ID',
-    #                                         'price': 'PRICE',
-    #                                         'availability': 'AVAILABILITY'},
-    #                                inplace=True)
-    #         products_df = pd.concat([products_df, new_products_df], sort=True)
-    #         remaining_shop_ids = products_df.loc[(products_df['ESHOP'].isnull()) &
-    #                                              (pd.notnull(products_df['ZBOZI_SHOP_ID'])),
-    #                                              'ZBOZI_SHOP_ID'].astype(int).astype(str).unique().tolist()
-    #
-    #         failed_shop_ids_strs = [','.join(map(str, map(int, shop_ids_group)))
-    #                                 for shop_ids_group in self.gen_seq_chunks(remaining_shop_ids, BATCH_SIZE_SHOPS)
-    #                                 ]
-    #
-    #         while failed_shop_ids_strs:
-    #             shop_ids_strs = failed_shop_ids_strs[:]
-    #             failed_shop_ids_strs = list()
-    #
-    #             for shop_ids_str in shop_ids_strs:
-    #                 shop_names = self.get_shop_names(shop_ids_str)
-    #                 if shop_names is not None:
-    #                     all_shop_names.extend(shop_names)
-    #                     time.sleep(1.01)
-    #                 else:
-    #                     failed_shop_ids_strs.append(shop_ids_str)
-    #                     time.sleep(1)
-    #
-    #                 skip_execution = (datetime.utcnow() - EXECUTION_START) >= TIMEOUT_DELTA
-    #                 if skip_execution:
-    #                     products_df = self.merge_tables(products_df, shop_names=all_shop_names,
-    #                                                     material_map=material_map)
-    #                     self.write_output(products_df)
-    #                     self.update_keep_scraping(value=1)
-    #                     break
-    #             if skip_execution:
-    #                 break
-    #
-    #     logging.debug('End shops requests')
-    #     skip_execution = (datetime.utcnow() - EXECUTION_START) >= TIMEOUT_DELTA
-    #     if not skip_execution:
-    #         logging.debug('Start writeout')
-    #         products_df = self.merge_tables(products_df, shop_names=all_shop_names, material_map=material_map)
-    #         self.write_output(products_df)
-    #         self.update_keep_scraping(value=0)
-    #         logging.debug('End writeout')
 
 
 class Writer(object):
@@ -415,7 +278,7 @@ class Writer(object):
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO, handlers=[])  # do not create default stdout handler
+    logging.basicConfig(level=logging.WARNING, handlers=[])  # do not create default stdout handler
     logger = logging.getLogger()
     logging_gelf_handler = logging_gelf.handlers.GELFTCPSocketHandler(
         host=os.getenv('KBC_LOGGER_ADDR'),
