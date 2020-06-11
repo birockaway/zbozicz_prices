@@ -45,9 +45,10 @@ class Producer(object):
         self.out_cols = ['AVAILABILITY', 'COUNTRY', 'CSE_ID', 'CSE_URL', 'DISTRCHAN', 'ESHOP', 'FREQ',
                          'HIGHLIGHTED_POSITION', 'MATERIAL', 'POSITION', 'PRICE', 'RATING',
                          'REVIEW_COUNT', 'SOURCE', 'SOURCE_ID', 'STOCK', 'TOP', 'TS', 'URL']
-        additional_cols = ['ZBOZI_SHOP_ID', 'MATCHING_ID', 'DATE']
-        self.all_cols = self.out_cols + additional_cols
+        self.all_cols = self.out_cols + ['DATE', 'ZBOZI_SHOP_ID', 'MATCHING_ID']
         self.export_table = 'results'
+        self.daily_uploads_file = 'zbozi_products.csv'
+        self.previous_df = self.load_previous_ids()
 
         try:
             # load next url from file, if previous run ended early
@@ -100,7 +101,7 @@ class Producer(object):
                 h_shops_df['HIGHLIGHTED_POSITION'] = np.arange(1, len(h_shops_df) + 1)
 
                 product_page = pd.concat([shops_df, h_shops_df], sort=True)
-                product_page['DATE'] = datetime.now().strftime('%Y-%m-%d')
+                product_page['DATE'] = CURRENT_DATE_STR
                 product_page['TS'] = datetime.now().strftime('%Y%m%d%H%M%S')
                 product_page['CSE_ID'] = str(data['productId'])
                 product_page = product_page.groupby('shopId', as_index=False).first()
@@ -166,17 +167,28 @@ class Producer(object):
         products_df.loc[:, 'STOCK'] = np.where(products_df['AVAILABILITY'] == '0', '1', '0')
         return products_df
 
+    def load_previous_ids(self):
+        df = pd.read_csv(f'{self.datadir}in/tables/{self.daily_uploads_file}', dtype=object)
+        # keep only today's values
+        df = df.drop(df[df['DATE'] != CURRENT_DATE_STR].index)
+        return df
+
     def produce(self):
         try:
             batch_counter = 0
             while self.next_url is not None and datetime.utcnow() - EXECUTION_START < TIMEOUT_DELTA:
-                self.produce_batch()
-                logging.debug(f'Finished batch #{batch_counter}')
+                logging.info(f'Starting batch #{batch_counter}')
+                rows_count = self.produce_batch()
+                logging.info(f'Finished batch #{batch_counter}, rows written: {rows_count}')
                 batch_counter += 1
 
         except Exception as e:
             logging.exception(f'Error occurred {e}')
         finally:
+            # write url for next run to continue where this run left off
+            self.update_keep_scraping()
+            # write out all gathered ids for deduplication
+            self.previous_df.to_csv(f'{self.datadir}/out/tables/{self.daily_uploads_file}', index=False)
             # send ending token
             self.task_queue.put('DONE')
 
@@ -188,6 +200,9 @@ class Producer(object):
             response = requests.get(f'{URL_BASE}{self.next_url}', auth=self.auth)
 
         content = json.loads(response.text)
+        # set url for next run
+        next_url = content.get('links', dict()).get('next')
+        self.next_url = next_url
         product_ids = [(str(item['itemId']), str(item['product']['productId']))
                        for item in content.get('data', list())
                        if item.get('product') is not None
@@ -195,6 +210,11 @@ class Producer(object):
 
         logging.debug('End product requests')
         material_map = pd.DataFrame(product_ids, columns=['MATERIAL', 'CSE_ID']).astype(object)
+        previous_ids = self.previous_df['CSE_ID'].to_list()
+        # remove ids already scraped today
+        excluded_ids = material_map['CSE_ID'].isin(previous_ids)
+        logging.debug(f'Excluding from scrape: {material_map[excluded_ids]["CSE_ID"].values.tolist()}')
+        material_map = material_map[~excluded_ids]
 
         #############################################################################
         # PRODUCT PAGES
@@ -204,7 +224,7 @@ class Producer(object):
             ids_str = ','.join(map(str, map(int, ids_group)))
             failed_product_ids_strs.append(ids_str)
 
-        products_df = pd.DataFrame(columns=self.out_cols)
+        products_df = pd.DataFrame(columns=self.all_cols)
         logging.debug('Start product pages requests')
 
         while failed_product_ids_strs:
@@ -222,11 +242,15 @@ class Producer(object):
                     products_df = pd.concat([products_df, product_batch_df], sort=True)
                     time.sleep(0.23)
                 else:
-                    logging.info(f'product_ids_str: {ids_str} failed')
+                    logging.warning(f'product_ids_str: {ids_str} failed')
                     failed_product_ids_strs.append(ids_str)
                     time.sleep(1.21)
 
         logging.debug('End product pages requests')
+
+        if products_df.empty:
+            # no new data, no point in continuing, batch will write nothing
+            return 0
 
         ###############################################################################
         # SHOP NAMES
@@ -252,9 +276,11 @@ class Producer(object):
         products_df = self.merge_tables(products_df, shop_names=all_shop_names,
                                         material_map=material_map)
         self.write_output(products_df)
-        next_url = content.get('links', dict()).get('next')
-        self.next_url = next_url
-        self.update_keep_scraping()
+
+        # write out
+        new_prevs_df = products_df[['CSE_ID', 'DATE']].groupby(['CSE_ID', 'DATE']).first().reset_index()
+        self.previous_df = pd.concat([self.previous_df, new_prevs_df])
+        return len(products_df)
 
 
 class Writer(object):
@@ -278,7 +304,7 @@ class Writer(object):
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.WARNING, handlers=[])  # do not create default stdout handler
+    logging.basicConfig(level=logging.INFO)  # do not create default stdout handler
     logger = logging.getLogger()
     logging_gelf_handler = logging_gelf.handlers.GELFTCPSocketHandler(
         host=os.getenv('KBC_LOGGER_ADDR'),
