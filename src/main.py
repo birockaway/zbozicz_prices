@@ -17,12 +17,12 @@ import requests
 from keboola import docker
 
 
-TIMEOUT_DELTA = timedelta(hours=2, minutes=40)
+TIMEOUT_DELTA = timedelta(hours=2, minutes=45)
 EXECUTION_START = datetime.utcnow()
 URL_BASE = 'https://api.zbozi.cz'
 BATCH_SIZE_PRODUCTS = 10
 BATCH_SIZE_SHOPS = 100
-TS = EXECUTION_START.strftime('%Y%m%d%H%M%S')
+TS = EXECUTION_START.strftime('%Y-%m-%d %H:%M:%S')
 CURRENT_DATE_STR = EXECUTION_START.strftime('%Y-%m-%d')
 COUNTRY = 'CZ'
 DISTRCHAN = 'MA'
