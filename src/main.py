@@ -168,9 +168,13 @@ class Producer(object):
         return products_df
 
     def load_previous_ids(self):
-        df = pd.read_csv(f'{self.datadir}in/tables/{self.daily_uploads_file}', dtype=object)
-        # keep only today's values
-        df = df.drop(df[df['DATE'] != CURRENT_DATE_STR].index)
+        try:
+            df = pd.read_csv(f'{self.datadir}in/tables/{self.daily_uploads_file}', dtype=object)
+            # keep only today's values
+            df = df.drop(df[df['DATE'] != CURRENT_DATE_STR].index)
+        except Exception:
+            df = pd.DataFrame(columns=['CSE_ID', 'DATE'])
+
         return df
 
     def produce(self):
@@ -188,7 +192,7 @@ class Producer(object):
             # write url for next run to continue where this run left off
             self.update_keep_scraping()
             # write out all gathered ids for deduplication
-            self.previous_df.to_csv(f'{self.datadir}/out/tables/{self.daily_uploads_file}', index=False)
+            self.previous_df.to_csv(f'{self.datadir}out/tables/{self.daily_uploads_file}', index=False)
             # send ending token
             self.task_queue.put('DONE')
 
