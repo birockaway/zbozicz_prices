@@ -1,10 +1,8 @@
 import concurrent.futures
-import csv
 import json
 import logging
 import os
 import queue
-import threading
 import time
 from datetime import datetime, timedelta
 
@@ -15,6 +13,7 @@ import numpy as np
 import pandas as pd
 import requests
 from keboola import docker
+from extractors_writer import Writer
 
 
 TIMEOUT_DELTA = timedelta(hours=2, minutes=45)
@@ -223,7 +222,6 @@ class Producer(object):
         #############################################################################
         # PRODUCT PAGES
         failed_product_ids_strs = list()
-
         for ids_group in self.gen_seq_chunks(material_map['CSE_ID'], BATCH_SIZE_PRODUCTS):
             ids_str = ','.join(map(str, map(int, ids_group)))
             failed_product_ids_strs.append(ids_str)
@@ -234,7 +232,6 @@ class Producer(object):
         while failed_product_ids_strs:
             ids_strs = failed_product_ids_strs[:]
             failed_product_ids_strs = list()
-
             for ids_str in ids_strs:
                 product_batch_df = self.get_products(ids_str)
                 if product_batch_df is not None:
@@ -287,28 +284,8 @@ class Producer(object):
         return len(products_df)
 
 
-class Writer(object):
-    def __init__(self, task_queue, columns_list, threading_event, filepath):
-        self.task_queue = task_queue
-        self.columns_list = columns_list
-        self.threading_event = threading_event
-        self.filepath = filepath
-
-    def write(self):
-        with open(self.filepath, 'w+') as outfile:
-            results_writer = csv.DictWriter(outfile, fieldnames=self.columns_list, extrasaction='ignore')
-            results_writer.writeheader()
-            while not self.threading_event.is_set():
-                chunk = self.task_queue.get()
-                if chunk == 'DONE':
-                    logging.info('DONE received. Exiting.')
-                    self.threading_event.set()
-                else:
-                    results_writer.writerows(chunk)
-
-
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)  # do not create default stdout handler
+    logging.basicConfig(level=logging.INFO, handlers=[])  # do not create default stdout handler
     logger = logging.getLogger()
     logging_gelf_handler = logging_gelf.handlers.GELFTCPSocketHandler(
         host=os.getenv('KBC_LOGGER_ADDR'),
@@ -340,9 +317,8 @@ if __name__ == '__main__':
     datadir = os.getenv('KBC_DATADIR', '/data/')
     path = f'{os.getenv("KBC_DATADIR")}out/tables/results.csv'
     pipeline = queue.Queue(maxsize=1000)
-    event = threading.Event()
     producer = Producer(datadir, pipeline)
-    writer = Writer(pipeline, colnames, event, path)
+    writer = Writer(pipeline, colnames, path)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         executor.submit(producer.produce)
-        executor.submit(writer.write)
+        executor.submit(writer)
