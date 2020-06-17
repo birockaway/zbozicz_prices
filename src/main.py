@@ -4,6 +4,7 @@ import logging
 import os
 import queue
 import time
+from traceback import format_tb
 from datetime import datetime, timedelta
 
 import logging_gelf.handlers
@@ -28,10 +29,6 @@ DISTRCHAN = 'MA'
 SOURCE = 'zbozi'
 FREQ = 'd'
 SOURCE_ID = f'{SOURCE}_{TS}'
-
-
-class DailyScrapingFinishedError(Exception):
-    pass
 
 
 class Producer(object):
@@ -186,7 +183,8 @@ class Producer(object):
                 batch_counter += 1
 
         except Exception as e:
-            logging.exception(f'Error occurred {e}')
+            trace = 'Traceback:\n' + ''.join(format_tb(e.__traceback__))
+            logging.error(f'Error occurred {e}', extra={'full_message': trace})
         finally:
             # write url for next run to continue where this run left off
             self.update_keep_scraping()
